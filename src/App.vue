@@ -24,14 +24,14 @@
 
     <!-- Main Content Container -->
     <main class="main-content">
-      <!-- Loading State -->
-      <section v-if="loading" class="state-container">
+      <!-- Loading State (Initial Load) -->
+      <section v-if="loading && lessons.length === 0" class="state-container">
         <div class="spinner"></div>
         <p>Loading available classes...</p>
       </section>
 
       <!-- Error State -->
-      <section v-else-if="error" class="state-container error-state">
+      <section v-else-if="error && lessons.length === 0" class="state-container error-state">
         <div class="error-card">
           <span class="error-icon">⚠️</span>
           <h2>Unable to Load Classes</h2>
@@ -40,13 +40,29 @@
         </div>
       </section>
 
-      <!-- Empty State -->
-      <section v-else-if="lessons.length === 0" class="state-container">
-        <p>No classes are currently available.</p>
-      </section>
-
       <!-- Lesson Catalog Section -->
       <section v-else class="catalog-section">
+        <!-- Live Search Bar -->
+        <div class="search-box-wrap">
+          <span class="search-icon">🔍</span>
+          <input 
+            type="text"
+            v-model="searchQuery"
+            class="search-input"
+            placeholder="Search classes by subject, location, price, or spaces..."
+            aria-label="Search classes"
+          />
+          <span v-if="isSearching" class="search-spinner" title="Searching..."></span>
+          <button 
+            v-if="searchQuery" 
+            class="btn-clear" 
+            @click="clearSearch"
+            title="Clear search"
+          >
+            ✕
+          </button>
+        </div>
+
         <!-- Sorting Controls Toolbar -->
         <div class="sort-toolbar">
           <div class="sort-group">
@@ -86,13 +102,32 @@
           </div>
         </div>
 
+        <!-- Catalog Header Info -->
         <div class="catalog-header">
           <h2>Available Lessons</h2>
-          <span class="catalog-count">{{ sortedLessons.length }} classes listed</span>
+          <span class="catalog-count">
+            {{ sortedLessons.length }} {{ sortedLessons.length === 1 ? 'class' : 'classes' }} 
+            {{ searchQuery.trim() ? `found for "${searchQuery.trim()}"` : 'listed' }}
+          </span>
+        </div>
+
+        <!-- Empty Search Results State -->
+        <div v-if="sortedLessons.length === 0" class="no-results-card">
+          <span class="no-results-icon">🔎</span>
+          <h3>No matching classes found</h3>
+          <p v-if="searchQuery.trim()">
+            We couldn't find any lessons matching "<strong>{{ searchQuery.trim() }}</strong>".
+          </p>
+          <p v-else>
+            No classes are currently available in the database.
+          </p>
+          <button v-if="searchQuery.trim()" class="btn-clear-search" @click="clearSearch">
+            Clear Search Filter
+          </button>
         </div>
 
         <!-- Responsive Lesson Card Grid -->
-        <div class="lessons-grid">
+        <div v-else class="lessons-grid">
           <article 
             v-for="lesson in sortedLessons" 
             :key="lesson._id" 
@@ -157,14 +192,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { fetchLessons, getLessonImageUrl } from './services/apiService';
+import { ref, computed, watch, onMounted } from 'vue';
+import { fetchLessons, searchLessons, getLessonImageUrl } from './services/apiService';
 
 // Reactive State
 const lessons = ref([]);
 const cart = ref([]);
 const loading = ref(true);
 const error = ref(null);
+
+// Search State
+const searchQuery = ref('');
+const isSearching = ref(false);
+let searchDebounceTimer = null;
 
 // Sorting Controls State
 const sortBy = ref('topic');       // 'topic' | 'location' | 'price' | 'space'
@@ -174,6 +214,19 @@ const sortOrder = ref('asc');      // 'asc' | 'desc'
 const totalCartCount = computed(() => {
   return cart.value.reduce((total, item) => total + item.quantity, 0);
 });
+
+// Helper: Synchronize spaces on fetched lessons with local cart items
+const syncLessonsWithCart = (fetchedList) => {
+  return fetchedList.map(lesson => {
+    const cartItem = cart.value.find(item => item._id === lesson._id);
+    const reserved = cartItem ? cartItem.quantity : 0;
+    return {
+      ...lesson,
+      // Ensure space never drops below zero and accurately reflects cart deductions
+      space: Math.max(0, lesson.space - reserved)
+    };
+  });
+};
 
 // Computed Sorted Lessons: sorts string and numeric fields without mutating the original array
 const sortedLessons = computed(() => {
@@ -186,7 +239,7 @@ const sortedLessons = computed(() => {
       const valB = Number(b[sortBy.value]) || 0;
       comparison = valA - valB;
     } else {
-      // String comparisons (topic, location) using localeCompare
+      // String comparisons with localeCompare
       const strA = String(a[sortBy.value] || '');
       const strB = String(b[sortBy.value] || '');
       comparison = strA.localeCompare(strB, undefined, { sensitivity: 'base' });
@@ -196,20 +249,60 @@ const sortedLessons = computed(() => {
   });
 });
 
-// Fetch lessons from backend API on mount
+// Fetch all lessons from backend API on mount
 const loadLessons = async () => {
   loading.value = true;
   error.value = null;
 
   try {
     const data = await fetchLessons();
-    lessons.value = Array.isArray(data) ? data : [];
+    lessons.value = syncLessonsWithCart(Array.isArray(data) ? data : []);
   } catch (err) {
     console.error('[Frontend] Error loading lessons:', err);
     error.value = err.message || 'Failed to connect to backend server.';
   } finally {
     loading.value = false;
   }
+};
+
+// Perform live search query to backend GET /search?q=...
+const performSearch = async (query) => {
+  const trimmed = query.trim();
+  isSearching.value = true;
+  error.value = null;
+
+  try {
+    let data;
+    if (!trimmed) {
+      // Empty query returns full catalog
+      data = await fetchLessons();
+    } else {
+      // Live search via native fetch
+      data = await searchLessons(trimmed);
+    }
+    // Always preserve and sync active cart space reservations
+    lessons.value = syncLessonsWithCart(Array.isArray(data) ? data : []);
+  } catch (err) {
+    console.error('[Frontend] Live search failed:', err);
+    error.value = err.message || 'Search request failed.';
+  } finally {
+    isSearching.value = false;
+  }
+};
+
+// Debounce search input (~250ms) to avoid flooding backend requests while typing
+watch(searchQuery, (newQuery) => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    performSearch(newQuery);
+  }, 250);
+});
+
+// Clear search input and restore full catalog
+const clearSearch = () => {
+  searchQuery.value = '';
+  clearTimeout(searchDebounceTimer);
+  performSearch('');
 };
 
 // Add lesson to reactive cart and decrement space in local state
@@ -413,6 +506,70 @@ onMounted(() => {
   background-color: #b91c1c;
 }
 
+/* Live Search Box */
+.search-box-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-box-wrap:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.search-icon {
+  font-size: 1.2rem;
+  color: #64748b;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 1rem;
+  color: #0f172a;
+  margin-left: 0.75rem;
+  background: transparent;
+}
+
+.search-input::placeholder {
+  color: #94a3b8;
+}
+
+.search-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 0.5rem;
+}
+
+.btn-clear {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.btn-clear:hover {
+  color: #0f172a;
+  background-color: #f1f5f9;
+}
+
 /* Sorting Controls Toolbar */
 .sort-toolbar {
   background-color: #ffffff;
@@ -493,6 +650,50 @@ onMounted(() => {
   color: #64748b;
   font-size: 0.95rem;
   font-weight: 500;
+}
+
+/* No Results State */
+.no-results-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.no-results-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.no-results-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.3rem;
+  color: #0f172a;
+}
+
+.no-results-card p {
+  color: #64748b;
+  margin: 0 0 1.5rem;
+  font-size: 1rem;
+}
+
+.btn-clear-search {
+  padding: 0.6rem 1.25rem;
+  background-color: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-clear-search:hover {
+  background-color: #1d4ed8;
 }
 
 /* Responsive Card Grid */
