@@ -3,20 +3,29 @@
     <!-- Top Navigation Header -->
     <header class="navbar">
       <div class="nav-container">
-        <div class="brand">
+        <div class="brand" @click="showCart = false" style="cursor: pointer;" title="Go to Lesson Catalog">
           <span class="brand-icon">🎓</span>
           <h1 class="brand-title">After-School Classes &amp; Activities</h1>
         </div>
 
         <div class="nav-actions">
+          <!-- Toggleable Cart / Back Button -->
           <button 
             class="cart-btn" 
-            :disabled="totalCartCount === 0"
-            title="Shopping Cart"
+            :class="{ 'in-cart-view': showCart }"
+            :disabled="cart.length === 0 && !showCart"
+            @click="showCart = !showCart"
+            :title="showCart ? 'Return to Lesson Catalog' : 'View Shopping Cart'"
           >
-            <span class="cart-icon">🛒</span>
-            <span class="cart-text">Cart</span>
-            <span class="cart-badge">{{ totalCartCount }}</span>
+            <template v-if="showCart">
+              <span class="cart-icon">←</span>
+              <span class="cart-text">Back to Lessons</span>
+            </template>
+            <template v-else>
+              <span class="cart-icon">🛒</span>
+              <span class="cart-text">Cart</span>
+              <span class="cart-badge">{{ totalCartCount }}</span>
+            </template>
           </button>
         </div>
       </div>
@@ -40,8 +49,8 @@
         </div>
       </section>
 
-      <!-- Lesson Catalog Section -->
-      <section v-else class="catalog-section">
+      <!-- VIEW 1: LESSON CATALOG VIEW (when showCart is false) -->
+      <section v-else-if="!showCart" class="catalog-section">
         <!-- Live Search Bar -->
         <div class="search-box-wrap">
           <span class="search-icon">🔍</span>
@@ -187,6 +196,108 @@
           </article>
         </div>
       </section>
+
+      <!-- VIEW 2: SHOPPING CART VIEW (when showCart is true) -->
+      <section v-else class="cart-section">
+        <div class="cart-header">
+          <div>
+            <h2>Your Shopping Cart</h2>
+            <p class="cart-subtitle">Review your selected classes before checkout</p>
+          </div>
+          <button class="btn-continue-shopping" @click="showCart = false">
+            ← Continue Shopping
+          </button>
+        </div>
+
+        <!-- Empty Cart State -->
+        <div v-if="cart.length === 0" class="empty-cart-card">
+          <span class="empty-cart-icon">🛒</span>
+          <h3>Your shopping cart is empty</h3>
+          <p>You haven't reserved spaces in any classes yet.</p>
+          <button class="btn-browse-classes" @click="showCart = false">
+            Browse Lessons Catalog
+          </button>
+        </div>
+
+        <!-- Populated Cart Items & Summary -->
+        <div v-else class="cart-content-layout">
+          <!-- Cart Items List -->
+          <div class="cart-items-list">
+            <article 
+              v-for="item in cart" 
+              :key="item._id" 
+              class="cart-item-card"
+            >
+              <div class="cart-item-image-wrap">
+                <img 
+                  :src="getImageUrl(item.image)" 
+                  :alt="item.topic" 
+                  class="cart-item-image"
+                  @error="onImageError($event, item.topic)"
+                />
+              </div>
+
+              <div class="cart-item-details">
+                <h3 class="cart-item-topic">{{ item.topic }}</h3>
+                <p class="cart-item-meta">
+                  <span>📍 {{ item.location }}</span>
+                  <span>&bull;</span>
+                  <span>Unit Price: £{{ item.price }}</span>
+                </p>
+                <p class="cart-item-qty">
+                  Reserved Spaces: <strong>{{ item.quantity }}</strong>
+                </p>
+              </div>
+
+              <div class="cart-item-actions">
+                <span class="cart-item-subtotal">£{{ item.price * item.quantity }}</span>
+                <button 
+                  class="btn-remove"
+                  @click="removeFromCart(item)"
+                  title="Remove 1 space from cart"
+                >
+                  Remove
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <!-- Order Summary & Checkout Container -->
+          <div class="cart-summary-col">
+            <div class="summary-card">
+              <h3>Order Summary</h3>
+              
+              <div class="summary-row">
+                <span>Total Spaces Booked:</span>
+                <strong>{{ totalCartCount }}</strong>
+              </div>
+
+              <div class="summary-row">
+                <span>Total Classes:</span>
+                <strong>{{ cart.length }}</strong>
+              </div>
+
+              <hr class="summary-divider" />
+
+              <div class="summary-row total-row">
+                <span>Total Price:</span>
+                <strong class="total-amount">£{{ totalCartPrice }}</strong>
+              </div>
+            </div>
+
+            <!-- Checkout Section Container (Ready for Checkout Form in next step) -->
+            <section class="checkout-container-card">
+              <div class="checkout-header">
+                <h3>Checkout</h3>
+                <span class="checkout-badge">Step 2</span>
+              </div>
+              <p class="checkout-placeholder-note">
+                Ready to confirm your booking. Customer checkout details and order confirmation will be integrated here.
+              </p>
+            </section>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 </template>
@@ -200,6 +311,7 @@ const lessons = ref([]);
 const cart = ref([]);
 const loading = ref(true);
 const error = ref(null);
+const showCart = ref(false); // Toggle between Lesson Catalog (false) and Cart View (true)
 
 // Search State
 const searchQuery = ref('');
@@ -210,9 +322,14 @@ let searchDebounceTimer = null;
 const sortBy = ref('topic');       // 'topic' | 'location' | 'price' | 'space'
 const sortOrder = ref('asc');      // 'asc' | 'desc'
 
-// Total items in cart (sum of quantities across all items)
+// Total items/spaces in cart
 const totalCartCount = computed(() => {
   return cart.value.reduce((total, item) => total + item.quantity, 0);
+});
+
+// Total cart monetary price
+const totalCartPrice = computed(() => {
+  return cart.value.reduce((total, item) => total + (item.price * item.quantity), 0);
 });
 
 // Helper: Synchronize spaces on fetched lessons with local cart items
@@ -274,13 +391,10 @@ const performSearch = async (query) => {
   try {
     let data;
     if (!trimmed) {
-      // Empty query returns full catalog
       data = await fetchLessons();
     } else {
-      // Live search via native fetch
       data = await searchLessons(trimmed);
     }
-    // Always preserve and sync active cart space reservations
     lessons.value = syncLessonsWithCart(Array.isArray(data) ? data : []);
   } catch (err) {
     console.error('[Frontend] Live search failed:', err);
@@ -328,6 +442,27 @@ const addToCart = (lesson) => {
   }
 
   console.log(`[Cart] Added "${lesson.topic}". Total cart items: ${totalCartCount.value}`);
+};
+
+// Remove 1 space of a lesson from reactive cart and restore 1 space in lessons catalog
+const removeFromCart = (cartItem) => {
+  const itemIndex = cart.value.findIndex(item => item._id === cartItem._id);
+  if (itemIndex === -1) return;
+
+  // 1. Decrement cart quantity or remove item if quantity drops to zero
+  if (cart.value[itemIndex].quantity > 1) {
+    cart.value[itemIndex].quantity -= 1;
+  } else {
+    cart.value.splice(itemIndex, 1);
+  }
+
+  // 2. Restore 1 available space in the lessons catalog state
+  const lesson = lessons.value.find(l => l._id === cartItem._id);
+  if (lesson) {
+    lesson.space += 1;
+  }
+
+  console.log(`[Cart] Removed 1 space of "${cartItem.topic}". Total cart items: ${totalCartCount.value}`);
 };
 
 // Resolve image URL via API service
@@ -378,6 +513,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  user-select: none;
 }
 
 .brand-icon {
@@ -410,6 +546,14 @@ onMounted(() => {
 .cart-btn:hover:not(:disabled) {
   background-color: #1d4ed8;
   transform: translateY(-1px);
+}
+
+.cart-btn.in-cart-view {
+  background-color: #475569;
+}
+
+.cart-btn.in-cart-view:hover {
+  background-color: #334155;
 }
 
 .cart-btn:disabled {
@@ -869,11 +1013,326 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
+/* SHOPPING CART VIEW STYLES */
+.cart-section {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.cart-header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.75rem;
+  color: #0f172a;
+}
+
+.cart-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.btn-continue-shopping {
+  padding: 0.55rem 1.15rem;
+  background-color: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-continue-shopping:hover {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.empty-cart-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 4rem 2rem;
+  text-align: center;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.empty-cart-icon {
+  font-size: 3.5rem;
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.empty-cart-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.4rem;
+  color: #0f172a;
+}
+
+.empty-cart-card p {
+  color: #64748b;
+  margin: 0 0 1.5rem;
+}
+
+.btn-browse-classes {
+  padding: 0.7rem 1.5rem;
+  background-color: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.btn-browse-classes:hover {
+  background-color: #1d4ed8;
+}
+
+/* Cart Layout: Two Columns on Desktop */
+.cart-content-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 2rem;
+  align-items: start;
+}
+
+.cart-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cart-item-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.cart-item-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+}
+
+.cart-item-image-wrap {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.cart-item-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.cart-item-details {
+  flex: 1;
+}
+
+.cart-item-topic {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cart-item-meta {
+  margin: 0 0 0.4rem;
+  font-size: 0.88rem;
+  color: #64748b;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.cart-item-qty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.cart-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.cart-item-subtotal {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #059669;
+}
+
+.btn-remove {
+  padding: 0.4rem 0.85rem;
+  background-color: #fff1f2;
+  color: #e11d48;
+  border: 1px solid #fecdd3;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-remove:hover {
+  background-color: #ffe4e6;
+  border-color: #fda4af;
+  color: #be123c;
+}
+
+/* Cart Summary Column */
+.cart-summary-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.summary-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.summary-card h3 {
+  margin: 0 0 1.25rem;
+  font-size: 1.25rem;
+  color: #0f172a;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+  color: #475569;
+}
+
+.summary-row strong {
+  color: #0f172a;
+}
+
+.summary-divider {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1rem 0;
+}
+
+.total-row {
+  font-size: 1.15rem;
+  margin-bottom: 0;
+}
+
+.total-row span {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.total-amount {
+  font-size: 1.5rem;
+  color: #059669;
+  font-weight: 800;
+}
+
+/* Checkout Container Card (Placeholder for Step 6) */
+.checkout-container-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
+.checkout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.checkout-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.checkout-badge {
+  background-color: #f1f5f9;
+  color: #475569;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.checkout-placeholder-note {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 /* Responsive adjustments */
+@media (max-width: 960px) {
+  .cart-content-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
   .sort-toolbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .cart-item-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cart-item-actions {
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 0.75rem;
   }
 }
 
@@ -887,6 +1346,12 @@ onMounted(() => {
   .catalog-header {
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .cart-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
   }
 }
 </style>
