@@ -45,21 +45,61 @@
         <p>No classes are currently available.</p>
       </section>
 
-      <!-- Lesson Catalog Grid -->
+      <!-- Lesson Catalog Section -->
       <section v-else class="catalog-section">
-        <div class="catalog-header">
-          <h2>Available Lessons</h2>
-          <span class="catalog-count">{{ lessons.length }} classes listed</span>
+        <!-- Sorting Controls Toolbar -->
+        <div class="sort-toolbar">
+          <div class="sort-group">
+            <span class="sort-heading">Sort by:</span>
+            <div class="sort-options">
+              <label class="sort-radio-label">
+                <input type="radio" value="topic" v-model="sortBy" />
+                <span>Subject</span>
+              </label>
+              <label class="sort-radio-label">
+                <input type="radio" value="location" v-model="sortBy" />
+                <span>Location</span>
+              </label>
+              <label class="sort-radio-label">
+                <input type="radio" value="price" v-model="sortBy" />
+                <span>Price</span>
+              </label>
+              <label class="sort-radio-label">
+                <input type="radio" value="space" v-model="sortBy" />
+                <span>Spaces</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="sort-group">
+            <span class="sort-heading">Order:</span>
+            <div class="sort-options">
+              <label class="sort-radio-label">
+                <input type="radio" value="asc" v-model="sortOrder" />
+                <span>Ascending (A-Z / Low-High)</span>
+              </label>
+              <label class="sort-radio-label">
+                <input type="radio" value="desc" v-model="sortOrder" />
+                <span>Descending (Z-A / High-Low)</span>
+              </label>
+            </div>
+          </div>
         </div>
 
+        <div class="catalog-header">
+          <h2>Available Lessons</h2>
+          <span class="catalog-count">{{ sortedLessons.length }} classes listed</span>
+        </div>
+
+        <!-- Responsive Lesson Card Grid -->
         <div class="lessons-grid">
           <article 
-            v-for="lesson in lessons" 
+            v-for="lesson in sortedLessons" 
             :key="lesson._id" 
             class="lesson-card"
             :class="{ 'is-sold-out': lesson.space === 0 }"
           >
-            <!-- Card Image -->
+            <!-- Card Image with Object-Fit: Contain & Soft Background -->
             <div class="card-image-wrap">
               <img 
                 :src="getImageUrl(lesson.image)" 
@@ -126,9 +166,34 @@ const cart = ref([]);
 const loading = ref(true);
 const error = ref(null);
 
+// Sorting Controls State
+const sortBy = ref('topic');       // 'topic' | 'location' | 'price' | 'space'
+const sortOrder = ref('asc');      // 'asc' | 'desc'
+
 // Total items in cart (sum of quantities across all items)
 const totalCartCount = computed(() => {
   return cart.value.reduce((total, item) => total + item.quantity, 0);
+});
+
+// Computed Sorted Lessons: sorts string and numeric fields without mutating the original array
+const sortedLessons = computed(() => {
+  return [...lessons.value].sort((a, b) => {
+    let comparison = 0;
+
+    if (sortBy.value === 'price' || sortBy.value === 'space') {
+      // Numeric comparisons
+      const valA = Number(a[sortBy.value]) || 0;
+      const valB = Number(b[sortBy.value]) || 0;
+      comparison = valA - valB;
+    } else {
+      // String comparisons (topic, location) using localeCompare
+      const strA = String(a[sortBy.value] || '');
+      const strB = String(b[sortBy.value] || '');
+      comparison = strA.localeCompare(strB, undefined, { sensitivity: 'base' });
+    }
+
+    return sortOrder.value === 'desc' ? -comparison : comparison;
+  });
 });
 
 // Fetch lessons from backend API on mount
@@ -179,8 +244,7 @@ const getImageUrl = (imageFilename) => {
 
 // Fallback placeholder if image asset fails to load
 const onImageError = (event, topic) => {
-  // Replace with an inline SVG placeholder indicating the lesson topic
-  const svgFallback = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="180" viewBox="0 0 300 180"><rect width="300" height="180" fill="%23e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23718096" font-family="sans-serif" font-size="16">${encodeURIComponent(topic || 'Class Image')}</text></svg>`;
+  const svgFallback = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="180" viewBox="0 0 300 180"><rect width="300" height="180" fill="%23f1f5f9"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2364748b" font-family="sans-serif" font-weight="600" font-size="16">${encodeURIComponent(topic || 'Class Image')}</text></svg>`;
   event.target.src = svgFallback;
 };
 
@@ -349,12 +413,72 @@ onMounted(() => {
   background-color: #b91c1c;
 }
 
-/* Catalog Section */
+/* Sorting Controls Toolbar */
+.sort-toolbar {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+}
+
+.sort-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.sort-heading {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.sort-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.sort-radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #334155;
+  cursor: pointer;
+  padding: 0.35rem 0.65rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.sort-radio-label:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.sort-radio-label input[type="radio"] {
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+/* Catalog Header */
 .catalog-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   border-bottom: 2px solid #e2e8f0;
   padding-bottom: 0.75rem;
 }
@@ -401,28 +525,32 @@ onMounted(() => {
   background-color: #f8fafc;
 }
 
-/* Card Image Wrap */
+/* Card Image Wrap with Object-Fit: Contain & Soft Background */
 .card-image-wrap {
   position: relative;
   width: 100%;
-  height: 170px;
-  background-color: #f1f5f9;
+  height: 180px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1.25rem;
+  box-sizing: border-box;
   overflow: hidden;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .lesson-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   transition: transform 0.3s ease;
 }
 
 .lesson-card:hover:not(.is-sold-out) .lesson-image {
-  transform: scale(1.03);
+  transform: scale(1.06);
 }
 
 .sold-out-badge {
@@ -541,6 +669,13 @@ onMounted(() => {
 }
 
 /* Responsive adjustments */
+@media (max-width: 768px) {
+  .sort-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 640px) {
   .nav-container {
     flex-direction: column;
