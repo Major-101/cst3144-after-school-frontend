@@ -33,6 +33,39 @@
 
     <!-- Main Content Container -->
     <main class="main-content">
+      <!-- Order Confirmation Banner (shown upon successful checkout) -->
+      <section v-if="orderConfirmation" class="confirmation-banner" role="alert">
+        <div class="confirmation-card">
+          <div class="confirmation-icon">🎉</div>
+          <div class="confirmation-content">
+            <h2>Order Placed Successfully!</h2>
+            <p class="confirmation-order-id">
+              Order Reference: <strong>#{{ orderConfirmation.orderId }}</strong>
+            </p>
+            <p class="confirmation-thankyou">
+              Thank you, <strong>{{ orderConfirmation.name }}</strong>! Your booking for 
+              <strong>{{ orderConfirmation.totalItems }} space(s)</strong> totaling 
+              <strong>£{{ orderConfirmation.totalPrice }}</strong> has been confirmed.
+            </p>
+            <p class="confirmation-contact">
+              A booking confirmation has been logged for contact number <strong>{{ orderConfirmation.phone }}</strong>.
+            </p>
+            <div class="confirmation-items">
+              <span v-for="item in orderConfirmation.items" :key="item._id" class="confirmation-chip">
+                {{ item.topic }} (×{{ item.quantity }})
+              </span>
+            </div>
+          </div>
+          <button 
+            class="btn-dismiss-confirmation" 
+            @click="orderConfirmation = null"
+            title="Dismiss confirmation"
+          >
+            ✕ Dismiss
+          </button>
+        </div>
+      </section>
+
       <!-- Loading State (Initial Load) -->
       <section v-if="loading && lessons.length === 0" class="state-container">
         <div class="spinner"></div>
@@ -197,12 +230,12 @@
         </div>
       </section>
 
-      <!-- VIEW 2: SHOPPING CART VIEW (when showCart is true) -->
+      <!-- VIEW 2: SHOPPING CART & CHECKOUT VIEW (when showCart is true) -->
       <section v-else class="cart-section">
         <div class="cart-header">
           <div>
             <h2>Your Shopping Cart</h2>
-            <p class="cart-subtitle">Review your selected classes before checkout</p>
+            <p class="cart-subtitle">Review your selected classes and complete your reservation</p>
           </div>
           <button class="btn-continue-shopping" @click="showCart = false">
             ← Continue Shopping
@@ -219,9 +252,9 @@
           </button>
         </div>
 
-        <!-- Populated Cart Items & Summary -->
+        <!-- Populated Cart Items & Checkout Layout -->
         <div v-else class="cart-content-layout">
-          <!-- Cart Items List -->
+          <!-- Left Column: Cart Items List -->
           <div class="cart-items-list">
             <article 
               v-for="item in cart" 
@@ -262,8 +295,9 @@
             </article>
           </div>
 
-          <!-- Order Summary & Checkout Container -->
+          <!-- Right Column: Order Summary & Checkout Form -->
           <div class="cart-summary-col">
+            <!-- Order Summary Card -->
             <div class="summary-card">
               <h3>Order Summary</h3>
               
@@ -280,20 +314,92 @@
               <hr class="summary-divider" />
 
               <div class="summary-row total-row">
-                <span>Total Price:</span>
+                <span>Total Amount:</span>
                 <strong class="total-amount">£{{ totalCartPrice }}</strong>
               </div>
             </div>
 
-            <!-- Checkout Section Container (Ready for Checkout Form in next step) -->
-            <section class="checkout-container-card">
+            <!-- Checkout Form Card -->
+            <section class="checkout-card">
               <div class="checkout-header">
-                <h3>Checkout</h3>
-                <span class="checkout-badge">Step 2</span>
+                <h3>Customer Checkout</h3>
+                <span class="checkout-badge">Required</span>
               </div>
-              <p class="checkout-placeholder-note">
-                Ready to confirm your booking. Customer checkout details and order confirmation will be integrated here.
-              </p>
+
+              <form @submit.prevent="handleCheckout" class="checkout-form" novalidate>
+                <!-- Name Field -->
+                <div class="form-group">
+                  <label for="checkout-name" class="form-label">
+                    Full Name <span class="required">*</span>
+                  </label>
+                  <div class="input-wrap">
+                    <input 
+                      id="checkout-name"
+                      type="text" 
+                      v-model="checkoutName" 
+                      placeholder="e.g. John Smith" 
+                      class="form-input"
+                      :class="{ 
+                        'is-valid': checkoutName && isNameValid, 
+                        'is-invalid': checkoutName && !isNameValid 
+                      }"
+                      autocomplete="name"
+                      :disabled="isSubmitting"
+                    />
+                    <span v-if="checkoutName && isNameValid" class="valid-icon">✓</span>
+                  </div>
+                  <p v-if="checkoutName && !isNameValid" class="field-error-msg">
+                    Name must contain letters and spaces only.
+                  </p>
+                  <p v-else class="field-hint">
+                    Letters and spaces only
+                  </p>
+                </div>
+
+                <!-- Phone Field -->
+                <div class="form-group">
+                  <label for="checkout-phone" class="form-label">
+                    Phone Number <span class="required">*</span>
+                  </label>
+                  <div class="input-wrap">
+                    <input 
+                      id="checkout-phone"
+                      type="tel" 
+                      v-model="checkoutPhone" 
+                      placeholder="e.g. 07123456789" 
+                      class="form-input"
+                      :class="{ 
+                        'is-valid': checkoutPhone && isPhoneValid, 
+                        'is-invalid': checkoutPhone && !isPhoneValid 
+                      }"
+                      autocomplete="tel"
+                      :disabled="isSubmitting"
+                    />
+                    <span v-if="checkoutPhone && isPhoneValid" class="valid-icon">✓</span>
+                  </div>
+                  <p v-if="checkoutPhone && !isPhoneValid" class="field-error-msg">
+                    Phone must contain numbers only.
+                  </p>
+                  <p v-else class="field-hint">
+                    Digits only (e.g. 07123456789)
+                  </p>
+                </div>
+
+                <!-- Submission Error Message -->
+                <div v-if="checkoutError" class="checkout-error-box">
+                  <strong>Booking Failed:</strong> {{ checkoutError }}
+                </div>
+
+                <!-- Checkout Submit Button -->
+                <button 
+                  type="submit" 
+                  class="btn-checkout"
+                  :disabled="!isCheckoutValid"
+                >
+                  <span v-if="isSubmitting" class="checkout-spinner"></span>
+                  <span>{{ isSubmitting ? 'Processing Booking...' : `Confirm & Book (£${totalCartPrice})` }}</span>
+                </button>
+              </form>
             </section>
           </div>
         </div>
@@ -304,7 +410,13 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
-import { fetchLessons, searchLessons, getLessonImageUrl } from './services/apiService';
+import { 
+  fetchLessons, 
+  searchLessons, 
+  createOrder, 
+  updateLessonSpaces, 
+  getLessonImageUrl 
+} from './services/apiService';
 
 // Reactive State
 const lessons = ref([]);
@@ -322,6 +434,13 @@ let searchDebounceTimer = null;
 const sortBy = ref('topic');       // 'topic' | 'location' | 'price' | 'space'
 const sortOrder = ref('asc');      // 'asc' | 'desc'
 
+// Checkout Form State
+const checkoutName = ref('');
+const checkoutPhone = ref('');
+const isSubmitting = ref(false);
+const checkoutError = ref(null);
+const orderConfirmation = ref(null);
+
 // Total items/spaces in cart
 const totalCartCount = computed(() => {
   return cart.value.reduce((total, item) => total + item.quantity, 0);
@@ -330,6 +449,24 @@ const totalCartCount = computed(() => {
 // Total cart monetary price
 const totalCartPrice = computed(() => {
   return cart.value.reduce((total, item) => total + (item.price * item.quantity), 0);
+});
+
+// Input Validation Computed Properties
+// Name validation: Letters and spaces only, non-empty after trimming
+const isNameValid = computed(() => {
+  const trimmed = checkoutName.value.trim();
+  return trimmed.length > 0 && /^[A-Za-z\s]+$/.test(trimmed);
+});
+
+// Phone validation: Numbers only, non-empty after trimming
+const isPhoneValid = computed(() => {
+  const trimmed = checkoutPhone.value.trim();
+  return trimmed.length > 0 && /^\d+$/.test(trimmed);
+});
+
+// Checkout button validity: both fields valid, cart has items, not submitting
+const isCheckoutValid = computed(() => {
+  return isNameValid.value && isPhoneValid.value && cart.value.length > 0 && !isSubmitting.value;
 });
 
 // Helper: Synchronize spaces on fetched lessons with local cart items
@@ -465,6 +602,76 @@ const removeFromCart = (cartItem) => {
   console.log(`[Cart] Removed 1 space of "${cartItem.topic}". Total cart items: ${totalCartCount.value}`);
 };
 
+// Handle Checkout Submission & Backend Persistence
+const handleCheckout = async () => {
+  if (!isCheckoutValid.value) return;
+
+  isSubmitting.value = true;
+  checkoutError.value = null;
+
+  try {
+    // 1. Build order payload conforming to backend POST /orders
+    const orderPayload = {
+      name: checkoutName.value.trim(),
+      phone: checkoutPhone.value.trim(),
+      lessonIds: cart.value.map(item => item._id),
+      spaces: totalCartCount.value,
+      lessons: cart.value.map(item => ({
+        lessonId: item._id,
+        topic: item.topic,
+        quantity: item.quantity,
+        price: item.price
+      })),
+      totalPrice: totalCartPrice.value
+    };
+
+    console.log('[Checkout] Submitting order payload:', orderPayload);
+
+    // 2. Submit order to backend POST /orders via native fetch
+    const orderResult = await createOrder(orderPayload);
+    console.log('[Checkout] Order created successfully:', orderResult);
+
+    // 3. For each booked lesson, persist the new remaining space on the backend (PUT /lessons/:id)
+    const updatePromises = cart.value.map(item => {
+      const currentLesson = lessons.value.find(l => l._id === item._id);
+      // The remaining space has already been decremented in local state
+      const remainingSpace = currentLesson ? currentLesson.space : 0;
+      console.log(`[Checkout] Updating lesson ${item._id} (${item.topic}) spaces to ${remainingSpace}`);
+      return updateLessonSpaces(item._id, remainingSpace);
+    });
+
+    await Promise.all(updatePromises);
+    console.log('[Checkout] All booked lesson spaces successfully updated in database.');
+
+    // 4. Capture confirmation details for display
+    orderConfirmation.value = {
+      orderId: orderResult.orderId || orderResult.order?._id || 'CONF-' + Math.floor(100000 + Math.random() * 900000),
+      name: checkoutName.value.trim(),
+      phone: checkoutPhone.value.trim(),
+      totalItems: totalCartCount.value,
+      totalPrice: totalCartPrice.value,
+      items: [...cart.value]
+    };
+
+    // 5. Reset cart and checkout input fields
+    cart.value = [];
+    checkoutName.value = '';
+    checkoutPhone.value = '';
+
+    // 6. Return smoothly to the Lesson Catalog view
+    showCart.value = false;
+
+    // Scroll to top to reveal confirmation banner
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  } catch (err) {
+    console.error('[Checkout] Error during order submission or space updates:', err);
+    checkoutError.value = err.message || 'An error occurred while processing your booking. Please try again.';
+  } finally {
+    isSubmitting.value = false;
+  }
+};
+
 // Resolve image URL via API service
 const getImageUrl = (imageFilename) => {
   return getLessonImageUrl(imageFilename);
@@ -589,6 +796,97 @@ onMounted(() => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem 1.5rem;
+}
+
+/* Order Confirmation Banner */
+.confirmation-banner {
+  margin-bottom: 2rem;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.confirmation-card {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  padding: 1.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  box-shadow: 0 4px 6px -1px rgba(22, 101, 52, 0.1);
+  position: relative;
+}
+
+.confirmation-icon {
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.confirmation-content {
+  flex: 1;
+}
+
+.confirmation-content h2 {
+  margin: 0 0 0.4rem;
+  color: #166534;
+  font-size: 1.4rem;
+}
+
+.confirmation-order-id {
+  margin: 0 0 0.5rem;
+  color: #15803d;
+  font-size: 0.95rem;
+}
+
+.confirmation-thankyou {
+  margin: 0 0 0.35rem;
+  color: #14532d;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.confirmation-contact {
+  margin: 0 0 0.85rem;
+  color: #166534;
+  font-size: 0.92rem;
+}
+
+.confirmation-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.confirmation-chip {
+  background-color: #ffffff;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.btn-dismiss-confirmation {
+  background: none;
+  border: 1px solid #86efac;
+  background-color: #ffffff;
+  color: #166534;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-dismiss-confirmation:hover {
+  background-color: #f0fdf4;
+  border-color: #4ade80;
 }
 
 /* Loading & Error States */
@@ -1106,7 +1404,7 @@ onMounted(() => {
 /* Cart Layout: Two Columns on Desktop */
 .cart-content-layout {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr 380px;
   gap: 2rem;
   align-items: start;
 }
@@ -1269,8 +1567,8 @@ onMounted(() => {
   font-weight: 800;
 }
 
-/* Checkout Container Card (Placeholder for Step 6) */
-.checkout-container-card {
+/* Checkout Form Card */
+.checkout-card {
   background-color: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -1282,18 +1580,20 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .checkout-header h3 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   color: #0f172a;
 }
 
 .checkout-badge {
-  background-color: #f1f5f9;
-  color: #475569;
+  background-color: #eff6ff;
+  color: #2563eb;
   padding: 0.2rem 0.6rem;
   border-radius: 9999px;
   font-size: 0.75rem;
@@ -1301,11 +1601,141 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
-.checkout-placeholder-note {
-  margin: 0;
+.checkout-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.form-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.required {
+  color: #dc2626;
+}
+
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.form-input {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  color: #0f172a;
+  background-color: #ffffff;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.form-input.is-valid {
+  border-color: #10b981;
+  padding-right: 2.2rem;
+}
+
+.form-input.is-valid:focus {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.form-input.is-invalid {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.form-input.is-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+
+.valid-icon {
+  position: absolute;
+  right: 0.75rem;
+  color: #10b981;
+  font-weight: 800;
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.field-error-msg {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.field-hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.checkout-error-box {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: #991b1b;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.btn-checkout {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.8rem;
+  background-color: #059669;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(5, 150, 105, 0.2);
+}
+
+.btn-checkout:hover:not(:disabled) {
+  background-color: #047857;
+  transform: translateY(-1px);
+}
+
+.btn-checkout:disabled {
+  background-color: #cbd5e1;
   color: #64748b;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.checkout-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
 /* Responsive adjustments */
@@ -1333,6 +1763,14 @@ onMounted(() => {
     align-items: center;
     border-top: 1px solid #f1f5f9;
     padding-top: 0.75rem;
+  }
+
+  .confirmation-card {
+    flex-direction: column;
+  }
+
+  .btn-dismiss-confirmation {
+    align-self: flex-end;
   }
 }
 
